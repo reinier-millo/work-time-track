@@ -179,12 +179,12 @@ with tab_tracker:
             if st.button("Start Timer", type="primary", width='stretch', disabled=weekly_limit_reached):
                 if prefix_input:
                     can_start = True
-                    # Jira Validation
+                    # Jira Validation - check if issue exists (not just assigned)
                     if jira_plugin and jira_plugin.get_setting("enabled") == "True":
                         # Check if it looks like a Jira key (e.g., PROJ-123)
                         if "-" in prefix_input:
-                            if not jira_plugin.is_assigned_to_me(prefix_input):
-                                st.error(f"Issue {prefix_input} is not assigned to you or could not be found.")
+                            if not jira_plugin.issue_exists(prefix_input):
+                                st.error(f"Jira issue {prefix_input} not found or you don't have access to it.")
                                 can_start = False
                     
                     # Gauzzy Validation

@@ -36,6 +36,17 @@ class JiraPlugin(TimeTrackerPlugin):
             return False
         except Exception:
             return False
+    
+    def issue_exists(self, issue_key):
+        """Check if a Jira issue exists (regardless of assignment)"""
+        client = self.get_client()
+        if not client: return False
+        
+        try:
+            issue = client.issue(issue_key)
+            return True
+        except Exception:
+            return False
 
     def get_assigned_issues(self):
         client = self.get_client()
