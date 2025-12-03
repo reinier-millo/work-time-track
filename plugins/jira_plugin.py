@@ -119,6 +119,9 @@ class JiraPlugin(TimeTrackerPlugin):
             if not issues:
                 st.info("No issues loaded or found.")
             else:
+                # Get Jira base URL for links
+                jira_url = self.get_setting("url", "")
+                
                 # Check active timer
                 active_prefix = None
                 if st.session_state.get('active_timer'):
@@ -127,7 +130,9 @@ class JiraPlugin(TimeTrackerPlugin):
                 for issue in issues:
                     col1, col2 = st.columns([4, 1])
                     with col1:
-                        st.markdown(f"**{issue.key}**: {issue.fields.summary}")
+                        # Create clickable link to issue
+                        issue_url = f"{jira_url}/browse/{issue.key}"
+                        st.markdown(f"[**{issue.key}**]({issue_url}): {issue.fields.summary}")
                     with col2:
                         if active_prefix == issue.key:
                             if st.button("Stop", key=f"stop_{issue.key}", type="primary"):

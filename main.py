@@ -69,9 +69,9 @@ def format_time(seconds):
     return f"{sign}{h:02}:{m:02}:{s:02}"
 
 # Tabs
-tab_tracker, tab_stats = st.tabs(["⏱️ Tracker", "📊 Statistics"])
+tab_timer, tab_stats = st.tabs(["⏱️ Timer", "📊 Statistics"])
 
-with tab_tracker:
+with tab_timer:
     # Dashboard Metrics
     col_m1, col_m2, col_m3 = st.columns(3)
     
@@ -252,50 +252,129 @@ with tab_tracker:
 with tab_stats:
     st.header("Statistics")
     
-    col_d1, col_d2 = st.columns(2)
+    # Date range picker - default to current week (Monday to Sunday)
     today = datetime.now().date()
-    start_date = col_d1.date_input("Start Date", today - timedelta(days=7))
-    end_date = col_d2.date_input("End Date", today)
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)  # Sunday
     
-    if start_date <= end_date:
-        # Convert to datetime for DB query
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", value=week_start)
+    with col2:
+        end_date = st.date_input("End Date", value=week_end)
+    
+    if start_date and end_date:
+        df_daily, df_all = database.get_stats_for_period(start_date, end_date)
         
-        df_daily, df_all = database.get_stats_for_period(start_dt, end_dt)
-        
-        # Summary
-        total_seconds = df_daily['total_seconds'].sum() if not df_daily.empty else 0
-        days_worked = len(df_daily)
-        daily_avg = total_seconds / days_worked if days_worked > 0 else 0
-        
-        col_s1, col_s2 = st.columns(2)
-        col_s1.metric("Total Time", format_time(total_seconds))
-        col_s2.metric("Daily Average", format_time(daily_avg))
-        
-        st.markdown("### 📈 Daily Activity")
+        # Summary metrics
         if not df_daily.empty:
-            # Convert seconds to hours for plotting
+            total_seconds = df_daily['total_seconds'].sum()
+            days_worked = len(df_daily)
+            daily_avg = total_seconds / days_worked if days_worked > 0 else 0
+            
+            col_s1, col_s2 = st.columns(2)
+            col_s1.metric("Total Time", format_time(total_seconds))
+            col_s2.metric("Daily Average", format_time(daily_avg))
+        
+        # Daily activity graph
+        st.subheader("📈 Daily Activity")
+        # Create a complete date range
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        df_complete = pd.DataFrame({'day': date_range.strftime('%Y-%m-%d')})
+        
+        if not df_daily.empty:
+            # Merge with actual data
             df_daily['hours'] = df_daily['total_seconds'] / 3600
-            st.bar_chart(df_daily, x='day', y='hours')
+            df_chart = df_complete.merge(df_daily[['day', 'hours']], on='day', how='left')
+            df_chart['hours'] = df_chart['hours'].fillna(0)
+            st.bar_chart(df_chart, x='day', y='hours')
         else:
-            st.info("No data for this period.")
-            
-        st.markdown("### 📋 Detailed Logs")
+            # Show all days with 0 hours
+            df_complete['hours'] = 0
+            st.bar_chart(df_complete, x='day', y='hours')
+        
+        
+        st.markdown("---")
+        # Task Totals section
+        st.subheader("📊 Task Totals")
         if not df_all.empty:
-            df_all['start_time'] = pd.to_datetime(df_all['start_time'])
-            df_all['end_time'] = pd.to_datetime(df_all['end_time'])
+            # Get Jira URL for links
+            jira_url = jira_plugin.get_setting("url", "") if jira_plugin else ""
             
-            st.dataframe(
-                df_all[['prefix', 'start_time', 'end_time', 'duration_seconds']],
-                column_config={
-                    "prefix": "Task Prefix",
-                    "start_time": st.column_config.DatetimeColumn("Start Time", format="D MMM YYYY, h:mm a"),
-                    "end_time": st.column_config.DatetimeColumn("End Time", format="D MMM YYYY, h:mm a"),
-                    "duration_seconds": st.column_config.NumberColumn("Duration (s)", format="%.2f"),
-                },
-                width='stretch',
-                hide_index=True
-            )
-    else:
-        st.error("Start date must be before end date.")
+            # Group by prefix and sum durations
+            df_totals = df_all.groupby('prefix').agg({
+                'duration_seconds': ['sum', 'count']
+            }).reset_index()
+            df_totals.columns = ['prefix', 'total_seconds', 'entry_count']
+            df_totals['total_hours'] = df_totals['total_seconds'] / 3600
+            df_totals = df_totals.sort_values('total_seconds', ascending=False)
+            
+            # Build custom table with st.columns
+            import re
+
+            # Header row
+            header_cols = st.columns([3, 1, 1])
+            header_cols[0].markdown("**Task/Issue**")
+            header_cols[1].markdown("**Total Hours**")
+            header_cols[2].markdown("**Entries**")
+            
+            # Data rows
+            for _, row in df_totals.iterrows():
+                cols = st.columns([3, 1, 1])
+                
+                # Task/Issue column - conditionally render as link or text
+                prefix = str(row['prefix'])
+                if jira_url and re.match(r'^[A-Z][A-Z0-9]+-[0-9]+$', prefix):
+                    # Jira issue - show as link
+                    cols[0].markdown(f"[{prefix}]({jira_url}/browse/{prefix})")
+                else:
+                    # Non-Jira - show as plain text
+                    cols[0].text(prefix)
+                
+                # Hours and count columns
+                cols[1].text(f"{row['total_hours']:.2f}")
+                cols[2].text(f"{int(row['entry_count'])}")
+        else:
+            st.info("No task data for selected period.")
+        
+        st.markdown("---")
+        # All entries table
+        st.subheader("📋 All Entries")
+        if not df_all.empty:
+            # Get Jira URL for links
+            jira_url = jira_plugin.get_setting("url", "") if jira_plugin else ""
+            
+            import re
+            
+            # Header row
+            header_cols = st.columns([2, 2, 2, 1])
+            header_cols[0].markdown("**Task/Issue**")
+            header_cols[1].markdown("**Start Time**")
+            header_cols[2].markdown("**End Time**")
+            header_cols[3].markdown("**Duration (s)**")
+            
+            # Data rows
+            for _, row in df_all.iterrows():
+                cols = st.columns([2, 2, 2, 1])
+                
+                # Task/Issue column - conditionally render as link or text
+                prefix = str(row['prefix'])
+                if jira_url and re.match(r'^[A-Z][A-Z0-9]+-[0-9]+$', prefix):
+                    # Jira issue - show as link
+                    cols[0].markdown(f"[{prefix}]({jira_url}/browse/{prefix})")
+                else:
+                    # Non-Jira - show as plain text
+                    cols[0].text(prefix)
+                
+                # Time columns
+                start_time = pd.to_datetime(row['start_time']).strftime('%d %b %Y, %I:%M %p')
+                end_time = pd.to_datetime(row['end_time']).strftime('%d %b %Y, %I:%M %p')
+                cols[1].text(start_time)
+                cols[2].text(end_time)
+                cols[3].text(f"{row['duration_seconds']:.2f}")
+        else:
+            st.info("No entries for selected period.")
+
+
+
+
