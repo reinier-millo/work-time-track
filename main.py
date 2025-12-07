@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import database
 from plugins.jira_plugin import JiraPlugin
 from plugins.gauzzy_plugin import GauzzyPlugin
+import altair as alt
 
 # Page Config
 st.set_page_config(
@@ -285,13 +286,40 @@ with tab_stats:
         if not df_daily.empty:
             # Merge with actual data
             df_daily['hours'] = df_daily['total_seconds'] / 3600
-            df_chart = df_complete.merge(df_daily[['day', 'hours']], on='day', how='left')
+            df_chart = df_complete.merge(df_daily[['day', 'hours', 'total_seconds']], on='day', how='left')
             df_chart['hours'] = df_chart['hours'].fillna(0)
-            st.bar_chart(df_chart, x='day', y='hours')
+            df_chart['total_seconds'] = df_chart['total_seconds'].fillna(0)
+            
+            # Create formatted time strings for hover
+            df_chart['Duration'] = df_chart['total_seconds'].apply(lambda x: format_time(x))
+            
+            # Create altair bar chart with custom tooltip
+            chart = alt.Chart(df_chart).mark_bar().encode(
+                x=alt.X('day:N', title='Day'),
+                y=alt.Y('hours:Q', title='Hours'),
+                tooltip=[
+                    alt.Tooltip('day:N', title='Day'),
+                    alt.Tooltip('Duration:N', title='Duration')
+                ]
+            ).properties(height=400)
+            
+            st.altair_chart(chart, width='stretch')
         else:
             # Show all days with 0 hours
             df_complete['hours'] = 0
-            st.bar_chart(df_complete, x='day', y='hours')
+            df_complete['Duration'] = '00:00:00'
+            
+            # Create altair bar chart with custom tooltip
+            chart = alt.Chart(df_complete).mark_bar().encode(
+                x=alt.X('day:N', title='Day'),
+                y=alt.Y('hours:Q', title='Hours'),
+                tooltip=[
+                    alt.Tooltip('day:N', title='Day'),
+                    alt.Tooltip('Duration:N', title='Duration')
+                ]
+            ).properties(height=400)
+            
+            st.altair_chart(chart, width='stretch')
         
         
         st.markdown("---")
@@ -315,7 +343,7 @@ with tab_stats:
             # Header row
             header_cols = st.columns([3, 1, 1])
             header_cols[0].markdown("**Task/Issue**")
-            header_cols[1].markdown("**Total Hours**")
+            header_cols[1].markdown("**Total Time**")
             header_cols[2].markdown("**Entries**")
             
             # Data rows
@@ -331,8 +359,8 @@ with tab_stats:
                     # Non-Jira - show as plain text
                     cols[0].text(prefix)
                 
-                # Hours and count columns
-                cols[1].text(f"{row['total_hours']:.2f}")
+                # Time and count columns
+                cols[1].text(format_time(row['total_seconds']))
                 cols[2].text(f"{int(row['entry_count'])}")
         else:
             st.info("No task data for selected period.")
@@ -351,7 +379,7 @@ with tab_stats:
             header_cols[0].markdown("**Task/Issue**")
             header_cols[1].markdown("**Start Time**")
             header_cols[2].markdown("**End Time**")
-            header_cols[3].markdown("**Duration (s)**")
+            header_cols[3].markdown("**Duration**")
             
             # Data rows
             for _, row in df_all.iterrows():
@@ -371,7 +399,7 @@ with tab_stats:
                 end_time = pd.to_datetime(row['end_time']).strftime('%d %b %Y, %I:%M %p')
                 cols[1].text(start_time)
                 cols[2].text(end_time)
-                cols[3].text(f"{row['duration_seconds']:.2f}")
+                cols[3].text(format_time(row['duration_seconds']))
         else:
             st.info("No entries for selected period.")
 
